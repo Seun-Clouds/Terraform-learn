@@ -13,27 +13,35 @@ variable "vpc_cidr_block" {
     type = string
 }
 
-variable "environment" {
-  description = "Deployment environment"
-}
+variable avail_zone {}
+
+variable env_prefix {}
+
+variable "my_ip" {}
+
+variable "instance_type" {}
+
+variable "public_key_location" {}
 
 # Create a VPC
-resource "aws_vpc" "mydev-vpc" {
+resource "aws_vpc" "myapp-vpc" {
   cidr_block = var.vpc_cidr_block
 
   tags = {
-    "Name" = var.environment
+    Name = "${var.env_prefix}-vpc"
   }
 }
 
+
+
 #Create a subnet
-resource "aws_subnet" "dev-subnet-1" {
-  vpc_id     = aws_vpc.mydev-vpc.id
+resource "aws_subnet" "myapp-subnet-1" {
+  vpc_id     = aws_vpc.myapp-vpc.id
   cidr_block = var.subnet_cidr_block
-  availability_zone = "eu-north-1a"
+  availability_zone = var.avail_zone
 
   tags = {
-    Name = "Dev subnet 1"
+    Name = "${var.env_prefix}-subnet-1"
   }
 }
 
@@ -59,4 +67,184 @@ resource "aws_subnet" "dev-subnet-1" {
 
 # output "dev-subnet-id" {
 #   value = aws_subnet.dev-subnet-1.id
+# }
+
+# Create an Intenet Gateway (IGW)
+resource "aws_internet_gateway" "myapp-igw" {
+  vpc_id = aws_vpc.myapp-vpc.id
+
+   tags = {
+    Name = "${var.env_prefix}-igw"
+  }
+}
+
+# # Create Route Table (RTB)
+# resource "aws_route_table" "myapp-route-table" {
+#   vpc_id = aws_vpc.myapp-vpc.id
+#   route {
+#     cidr_block = "0.0.0.0/0"
+#     gateway_id = aws_internet_gateway.myapp-igw.id
+#   }
+
+#    tags = {
+#     Name = "${var.env_prefix}-rtb"
+#   }
+# }
+
+# # Associate the Internet Gateway to the Route Table (RTB)
+# resource "aws_route_table_association" "a-rtb-subnet" {
+#   subnet_id      = aws_subnet.myapp-subnet-1.id
+#   route_table_id = aws_route_table.myapp-route-table.id
+# }
+
+
+# Associate the Internet Gateway to the default Route Table (RT)
+resource "aws_default_route_table" "main_vpc_default_rt" {
+  default_route_table_id = aws_vpc.myapp-vpc.default_route_table_id
+  route {
+    cidr_block = "0.0.0.0/0"  # default route
+    gateway_id = aws_internet_gateway.myapp-igw.id
+  }
+
+  tags = {
+    Name = "${var.env_prefix}-rtb"
+  }
+}
+
+# # Create Security Group
+# resource "aws_security_group" "myapp-sg" {
+#   name = "myapp-sg"
+#   vpc_id = aws_vpc.myapp-vpc.id
+
+#   ingress {
+#     from_port = 22
+#     to_port = 22
+#     protocol = "tcp"
+#     cidr_blocks = [var.my_ip]
+#   }
+#   # ingress {
+#   #   from_port = 80
+#   #   to_port = 80
+#   #   protocol = "tcp"
+#   #   cidr_blocks = ["0.0.0.0/0"]
+#   # }
+
+#   ingress {
+#     from_port = 8080
+#     to_port = 8080
+#     protocol = "tcp"
+#     cidr_blocks = ["0.0.0.0/0"]
+#   }
+
+#   egress {
+#     from_port = 0
+#     to_port = 0
+#     protocol = "-1"
+#     cidr_blocks = ["0.0.0.0/0"]
+#     prefix_list_ids = []
+#   }
+#  tags = {
+#     Name = "${var.env_prefix}-sg"
+#   }
+# }
+
+
+# default Security Group
+resource "aws_default_security_group" "default-sg" {
+  vpc_id = aws_vpc.myapp-vpc.id
+
+  ingress {
+    from_port = 22
+    to_port = 22
+    protocol = "tcp"
+    cidr_blocks = [var.my_ip]
+  }
+
+  ingress {
+    from_port = 80
+    to_port = 80
+    protocol = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port = 8080
+    to_port = 8080
+    protocol = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+    prefix_list_ids = []
+  }
+ tags = {
+    Name = "${var.env_prefix}-default-sg"
+  }
+}
+
+#Get latest instance from AWS
+data "aws_ami" "latest-amazon-linux-image"{
+  most_recent = true
+  owners = ["amazon"]
+  filter {
+    name = "name"
+    values = ["amzn2-ami-kernel-*-x86_64-gp2"]
+  }
+  filter {
+    name = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
+#Get the ID of the instance
+output "aws_ami_id" {
+  value = data.aws_ami.latest-amazon-linux-image.id
+}
+
+#Get the public IP  of the instance
+output "ec2_public_ip" {
+  value = aws_instance.myapp-server.public_ip
+}
+
+#link your public key to aws to create 
+resource "aws_key_pair" "ssh-key" {
+  key_name = "server-key"
+  public_key = file(var.public_key_location)
+}
+
+# Create an EC2 Instance
+resource "aws_instance" "myapp-server" {
+  ami = data.aws_ami.latest-amazon-linux-image.id
+  instance_type = var.instance_type
+
+  subnet_id = aws_subnet.myapp-subnet-1.id
+  vpc_security_group_ids = [aws_default_security_group.default-sg.id]
+  availability_zone = var.avail_zone
+
+  associate_public_ip_address = true
+  key_name = aws_key_pair.ssh-key.key_name
+
+  user_data = file("entry-script.sh")
+  
+  # # Dependency on null_resource for Docker installation
+  # depends_on = [
+  #   null_resource.docker_install
+  # ]
+
+  tags = {
+    Name = "${var.env_prefix}-server"
+  }  
+}
+
+# resource "null_resource" "docker_install" {
+#   provisioner "remote-exec" {
+#     # Use 'script' argument instead of 'inline_script'
+#     script = <<EOF
+#       sudo yum update -y && sudo yum install docker -y
+#     EOF
+#   }
 # }
