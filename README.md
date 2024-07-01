@@ -34,7 +34,7 @@
 
     export TF_VAR_avail_zone="eu-west-3a"
     
-### ssh into ec2
+### ssh into ec2 instance
 
     ssh ec2-user@public address
 
