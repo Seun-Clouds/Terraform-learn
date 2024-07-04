@@ -23,6 +23,8 @@ variable "instance_type" {}
 
 variable "public_key_location" {}
 
+variable "private_key_location" {}
+
 # Create a VPC
 resource "aws_vpc" "myapp-vpc" {
   cidr_block = var.vpc_cidr_block
@@ -31,7 +33,6 @@ resource "aws_vpc" "myapp-vpc" {
     Name = "${var.env_prefix}-vpc"
   }
 }
-
 
 
 #Create a subnet
@@ -205,10 +206,6 @@ output "aws_ami_id" {
   value = data.aws_ami.latest-amazon-linux-image.id
 }
 
-#Get the public IP  of the instance
-output "ec2_public_ip" {
-  value = aws_instance.myapp-server.public_ip
-}
 
 #link your public key to aws to create 
 resource "aws_key_pair" "ssh-key" {
@@ -228,23 +225,35 @@ resource "aws_instance" "myapp-server" {
   associate_public_ip_address = true
   key_name = aws_key_pair.ssh-key.key_name
 
-  user_data = file("entry-script.sh")
+  # user_data = file("entry-script.sh")
   
-  # # Dependency on null_resource for Docker installation
-  # depends_on = [
-  #   null_resource.docker_install
-  # ]
+  connection {
+    type = "ssh"
+    user = "ec2-user"
+    private_key = file(var.private_key_location)
+    # host = aws_instance.myapp-server.public_ip
+    host = self.public_ip
+  }
+
+  provisioner "file" {
+    source = "entry-script.sh"
+    destination = "/home/ec2-user/entry-script-on-ec2.sh"
+  }
+
+  provisioner "remote-exec" {
+    script = file("entry-script.sh")
+  }
+
+  provisioner "local-exec" {
+    command = "echo ${self.public_ip} > public_ip.txt"    
+  }
 
   tags = {
     Name = "${var.env_prefix}-server"
   }  
 }
 
-# resource "null_resource" "docker_install" {
-#   provisioner "remote-exec" {
-#     # Use 'script' argument instead of 'inline_script'
-#     script = <<EOF
-#       sudo yum update -y && sudo yum install docker -y
-#     EOF
-#   }
-# }
+#Get the public IP  of the instance
+output "ec2_public_ip" {
+  value = aws_instance.myapp-server.public_ip
+}
