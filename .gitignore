@@ -7,3 +7,13 @@
 
 # tf variable
 *.tfvars
+
+#Ignore CLI files
+.terraformrc
+terraform.rc
+
+# Ignore os
+.OS_Store
+
+# ignore crash logs
+crash.log
